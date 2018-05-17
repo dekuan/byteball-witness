@@ -1,26 +1,27 @@
 /*jslint node: true */
 "use strict";
-var conf = require('byteballcore/conf.js');
-var db = require('byteballcore/db.js');
-var storage = require('byteballcore/storage.js');
-var eventBus = require('byteballcore/event_bus.js');
-var mail = require('byteballcore/mail.js');
-var headlessWallet = require('headless-byteball');
-var desktopApp = require('byteballcore/desktop_app.js');
-var objectHash = require('byteballcore/object_hash.js');
 
-var WITNESSING_COST = 600; // size of typical witnessing unit
+var conf			= require('byteballcore/conf.js');
+var db				= require('byteballcore/db.js');
+var storage			= require('byteballcore/storage.js');
+var eventBus			= require('byteballcore/event_bus.js');
+var mail			= require('byteballcore/mail.js');
+var headlessWallet		= require('headless-byteball');
+var desktopApp			= require('byteballcore/desktop_app.js');
+var objectHash			= require('byteballcore/object_hash.js');
+
+var WITNESSING_COST		= 600; // size of typical witnessing unit
 var my_address;
-var bWitnessingUnderWay = false;
+var bWitnessingUnderWay		= false;
 var forcedWitnessingTimer;
-var count_witnessings_available = 0;
+var count_witnessings_available	= 0;
 
-if (!conf.bSingleAddress && require.main === module)
-	throw Error('witness must be single address');
 
-headlessWallet.setupChatEventHandlers();
 
-function notifyAdmin(subject, body){
+
+
+function notifyAdmin( subject, body )
+{
 	mail.sendmail({
 		to: conf.admin_email,
 		from: conf.from_email,
@@ -29,70 +30,94 @@ function notifyAdmin(subject, body){
 	});
 }
 
-function notifyAdminAboutFailedWitnessing(err){
+function notifyAdminAboutFailedWitnessing(err)
+{
 	console.log('witnessing failed: '+err);
 	notifyAdmin('witnessing failed: '+err, err);
 }
 
-function notifyAdminAboutWitnessingProblem(err){
+function notifyAdminAboutWitnessingProblem(err)
+{
 	console.log('witnessing problem: '+err);
 	notifyAdmin('witnessing problem: '+err, err);
 }
 
-
-function witness(onDone){
-	function onError(err){
+function witness( onDone )
+{
+	function onError(err)
+	{
 		notifyAdminAboutFailedWitnessing(err);
 		setTimeout(onDone, 60000); // pause after error
 	}
-	var network = require('byteballcore/network.js');
-	var composer = require('byteballcore/composer.js');
-	if (!network.isConnected()){
+
+	var network	= require( 'byteballcore/network.js' );
+	var composer	= require( 'byteballcore/composer.js' );
+	if ( ! network.isConnected() )
+	{
 		console.log('not connected, skipping');
 		return onDone();
 	}
-	createOptimalOutputs(function(arrOutputs){
-		let params = {
-			paying_addresses: [my_address], 
-			outputs: arrOutputs, 
-			signer: headlessWallet.signer, 
-			callbacks: composer.getSavingCallbacks({
-				ifNotEnoughFunds: onError,
-				ifError: onError,
-				ifOk: function(objJoint){
-					network.broadcastJoint(objJoint);
+
+	createOptimalOutputs( function( arrOutputs )
+	{
+		let params =
+		{
+			paying_addresses	: [my_address], 
+			outputs			: arrOutputs, 
+			signer			: headlessWallet.signer, 
+			callbacks		: composer.getSavingCallbacks
+			({
+				ifNotEnoughFunds	: onError,
+				ifError			: onError,
+				ifOk			: function( objJoint )
+				{
+					network.broadcastJoint( objJoint );
 					onDone();
 				}
 			})
 		};
-		if (conf.bPostTimestamp){
-			let timestamp = Date.now();
-			let datafeed = {timestamp: timestamp};
-			let objMessage = {
-				app: "data_feed",
-				payload_location: "inline",
-				payload_hash: objectHash.getBase64Hash(datafeed),
-				payload: datafeed
+
+		if ( conf.bPostTimestamp )
+		{
+			let timestamp	= Date.now();
+			let datafeed	= { timestamp: timestamp };
+			let objMessage	=
+			{
+				app			: "data_feed",
+				payload_location	: "inline",
+				payload_hash		: objectHash.getBase64Hash( datafeed ),
+				payload			: datafeed
 			};
-			params.messages = [objMessage];
+			params.messages	= [ objMessage ];
 		}
-		composer.composeJoint(params);
+		composer.composeJoint( params );
 	});
 }
 
-function checkAndWitness(){
-	console.log('checkAndWitness');
-	clearTimeout(forcedWitnessingTimer);
-	if (bWitnessingUnderWay)
+function checkAndWitness()
+{
+	console.log( 'checkAndWitness' );
+	clearTimeout( forcedWitnessingTimer );
+
+	if ( bWitnessingUnderWay )
+	{
 		return console.log('witnessing under way');
-	bWitnessingUnderWay = true;
-	// abort if there are my units without an mci
-	determineIfThereAreMyUnitsWithoutMci(function(bMyUnitsWithoutMci){
-		if (bMyUnitsWithoutMci){
+	}
+
+	//	...
+	bWitnessingUnderWay	= true;
+	
+	//	abort if there are my units without an mci
+	determineIfThereAreMyUnitsWithoutMci( function( bMyUnitsWithoutMci )
+	{
+		if ( bMyUnitsWithoutMci )
+		{
 			bWitnessingUnderWay = false;
 			return console.log('my units without mci');
 		}
-		storage.readLastMainChainIndex(function(max_mci){
+		
+		storage.readLastMainChainIndex( function( max_mci )
+		{
 			let col = (conf.storage === 'mysql') ? 'main_chain_index' : 'unit_authors.rowid';
 			db.query(
 				"SELECT main_chain_index AS max_my_mci FROM units JOIN unit_authors USING(unit) WHERE +address=? ORDER BY "+col+" DESC LIMIT 1", 
@@ -119,13 +144,15 @@ function checkAndWitness(){
 	});
 }
 
-function determineIfThereAreMyUnitsWithoutMci(handleResult){
+function determineIfThereAreMyUnitsWithoutMci( handleResult )
+{
 	db.query("SELECT 1 FROM units JOIN unit_authors USING(unit) WHERE address=? AND main_chain_index IS NULL LIMIT 1", [my_address], function(rows){
 		handleResult(rows.length > 0);
 	});
 }
 
-function checkForUnconfirmedUnits(distance_to_threshold){
+function checkForUnconfirmedUnits( distance_to_threshold )
+{
 	db.query( // look for unstable non-witness-authored units
 		"SELECT 1 FROM units CROSS JOIN unit_authors USING(unit) LEFT JOIN my_witnesses USING(address) \n\
 		WHERE (main_chain_index>? OR main_chain_index IS NULL AND sequence='good') \n\
@@ -148,9 +175,11 @@ function checkForUnconfirmedUnits(distance_to_threshold){
 	);
 }
 
-function witnessBeforeThreshold(){
+function witnessBeforeThreshold()
+{
 	if (bWitnessingUnderWay)
 		return;
+
 	bWitnessingUnderWay = true;
 	determineIfThereAreMyUnitsWithoutMci(function(bMyUnitsWithoutMci){
 		if (bMyUnitsWithoutMci){
@@ -164,7 +193,8 @@ function witnessBeforeThreshold(){
 	});
 }
 
-function readNumberOfWitnessingsAvailable(handleNumber){
+function readNumberOfWitnessingsAvailable( handleNumber )
+{
 	count_witnessings_available--;
 	if (count_witnessings_available > conf.MIN_AVAILABLE_WITNESSINGS)
 		return handleNumber(count_witnessings_available);
@@ -195,8 +225,9 @@ function readNumberOfWitnessingsAvailable(handleNumber){
 	);
 }
 
-// make sure we never run out of spendable (stable) outputs. Keep the number above a threshold, and if it drops below, produce more outputs than consume.
-function createOptimalOutputs(handleOutputs){
+//	make sure we never run out of spendable (stable) outputs. Keep the number above a threshold, and if it drops below, produce more outputs than consume.
+function createOptimalOutputs( handleOutputs )
+{
 	var arrOutputs = [{amount: 0, address: my_address}];
 	readNumberOfWitnessingsAvailable(function(count){
 		if (count > conf.MIN_AVAILABLE_WITNESSINGS)
@@ -204,10 +235,11 @@ function createOptimalOutputs(handleOutputs){
 		// try to split the biggest output in two
 		db.query(
 			"SELECT amount FROM outputs JOIN units USING(unit) \n\
-			WHERE address=? AND is_stable=1 AND amount>=? AND asset IS NULL AND is_spent=0 \n\
+			WHERE address = ? AND is_stable=1 AND amount >= ? AND asset IS NULL AND is_spent=0 \n\
 			ORDER BY amount DESC LIMIT 1", 
-			[my_address, 2*WITNESSING_COST],
-			function(rows){
+			[ my_address, 2 * WITNESSING_COST ],
+			function( rows )
+			{
 				if (rows.length === 0){
 					notifyAdminAboutWitnessingProblem('only '+count+" spendable outputs left, and can't add more");
 					return handleOutputs(arrOutputs);
@@ -223,18 +255,38 @@ function createOptimalOutputs(handleOutputs){
 
 
 
+
+
+
+
+
+
+if ( ! conf.bSingleAddress && require.main === module )
+{
+	throw Error('witness must be single address');
+}
+
+
+headlessWallet.setupChatEventHandlers();
+
+
 db.query("CREATE UNIQUE INDEX IF NOT EXISTS hcobyAddressSpentMci ON headers_commission_outputs(address, is_spent, main_chain_index)");
 db.query("CREATE UNIQUE INDEX IF NOT EXISTS byWitnessAddressSpentMci ON witnessing_outputs(address, is_spent, main_chain_index)");
 
-eventBus.on('headless_wallet_ready', function(){
-	if (!conf.admin_email || !conf.from_email){
+eventBus.on( 'headless_wallet_ready', function()
+{
+	if ( ! conf.admin_email || ! conf.from_email )
+	{
 		console.log("please specify admin_email and from_email in your "+desktopApp.getAppDataDir()+'/conf.json');
-		process.exit(1);
+		process.exit( 1 );
 	}
+
 	let readSingleAddress = conf.bSingleAddress ? headlessWallet.readSingleAddress : headlessWallet.readFirstAddress;
-	readSingleAddress(function(address){
+	readSingleAddress(function(address)
+	{
 		my_address = address;
-		//checkAndWitness();
+
+		//	checkAndWitness();
 		eventBus.on('new_joint', checkAndWitness); // new_joint event is not sent while we are catching up
 	});
 });
